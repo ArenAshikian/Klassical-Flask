@@ -100,11 +100,16 @@ def dashboard():
 def posts():
     # Get the posts from the database
     posts = Posts.query.order_by(Posts.date_posted).all()
-    
+
     # Create a comment form
     form = CommentForm()  # You need to create the CommentForm
-    
-    return render_template("posts.html", posts=posts, form=form)
+
+    # Query comments for each post and store them in a dictionary
+    comments = {}
+    for post in posts:
+        comments[post.id] = Comment.query.filter_by(post_id=post.id).all()
+
+    return render_template("posts.html", posts=posts, form=form, comments=comments)
 
 
 
@@ -378,11 +383,12 @@ class Posts(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(255))
     content = db.Column(db.Text)
-    #author = db.Column(db.String(255))
     date_posted = db.Column(db.DateTime, default=datetime.utcnow)
-    #Foreign Key to Link users (refers to primary key for users)
     poster_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    
+    # Add a relationship to the Comment model
     comments = db.relationship('Comment', backref='post', lazy='dynamic')
+
 
 #create model
 class Users(db.Model, UserMixin):
@@ -409,20 +415,60 @@ class Users(db.Model, UserMixin):
 class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     text = db.Column(db.Text, nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # ForeignKey to associate with a user
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     post_id = db.Column(db.Integer, db.ForeignKey('posts.id'), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Define a relationship to the Users model
-    user = db.relationship('Users', backref='comments')  # Assuming 'Users' is the name of your Users model
+    user = db.relationship('Users', backref='comments')
 
-    
+
     def __init__(self, text, user_id, post_id):
         self.text = text
         self.user_id = user_id
         self.post_id = post_id
+    
+    @app.route('/posts/edit-comment/<int:id>', methods=['GET', 'POST'])
+    @login_required
+    def edit_comment(id):
+        comment_to_edit = Comment.query.get_or_404(id)
+
+        # Ensure only the author of the comment can edit it
+        if current_user.id == comment_to_edit.user_id:
+            form = CommentForm()
+
+            if form.validate_on_submit():
+                comment_to_edit.text = form.text.data
+                db.session.commit()
+                flash("Comment Updated Successfully!")
+                return redirect(url_for('post', id=comment_to_edit.post_id))
+            
+            form.text.data = comment_to_edit.text
+            return render_template('edit_comment.html', form=form, comment_to_edit=comment_to_edit)
+        else:
+            flash("You can't edit this comment!")
+            return redirect(url_for('post', id=comment_to_edit.post_id))
 
 
-    # create a string
+    @app.route('/posts/delete-comment/<int:id>')
+    @login_required
+    def delete_comment(id):
+        comment_to_delete = Comment.query.get_or_404(id)
+        post_id = comment_to_delete.post_id
+
+        # Ensure only the author of the comment can delete it
+        if current_user.id == comment_to_delete.user_id:
+            db.session.delete(comment_to_delete)
+            db.session.commit()
+            flash("Comment Deleted Successfully!")
+        else:
+            flash("You can't delete this comment!")
+
+        return redirect(url_for('post', id=post_id))
+
+    
+    
+    # Create a string representation of the comment
     def __repr__(self):
-        return '<Name %r>' % self.name
+        return f'<Comment {self.id}>'
+
